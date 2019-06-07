@@ -30,13 +30,6 @@ bitmaps takes advantage of this.  If a block of bits is set to all
 zero values, a hole will be punched for the block if the operating
 system has that capability.
 
-The primary purpose it to mark rows deleted for the Warp storage 
-engine, a fork of Infobright Community Edition which supports DML,
-unlike the upstream version.  The sparse bitmap fits this purpose
-well, because if most rows are deleted, the file takes up little
-space because sparese disk uses very little real space.  If most
-of the rows in a table are deleted, then the 
-
 ## On disk format
 The sparse bitmap consists of a sparse file on disk, and a log file.
 
