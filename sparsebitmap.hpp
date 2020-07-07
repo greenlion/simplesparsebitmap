@@ -1,4 +1,4 @@
-/* Copyright (C)  2015 WarpSQL.com
+/* Copyright (C)  2020 Justin Swanhart
 
 	 This program is free software; you can redistribute it and/or modify
 	 it under the terms of the GNU General Public License version 2.0 as
@@ -14,8 +14,8 @@
 	 Software Foundation,  Inc., 59 Temple Place, Suite 330, Boston, MA
 	 02111-1307 USA  */
 
-#ifndef __Warp_SparseBitmap__
-#define __Warp_SparseBitmap__
+#ifndef WARP_SPARSE_HEADER
+#define WARP_SPARSE_HEADER
 #include <stdio.h>
 #include <string>
 #include <iostream>
@@ -36,7 +36,7 @@
 #endif
 
 
-class SparseBitmap
+class sparsebitmap
 {
 private:
   int debug_flag;
@@ -48,6 +48,13 @@ private:
       std::cerr << line << ":" << message << "\n";
     }
   } 
+
+public:
+  bool is_dirty() {
+    return dirty == 1;
+  }
+
+private:
 
   /* Index locking */ 
   void unlock() { 
@@ -85,7 +92,7 @@ private:
   bool exists(std::string filename) {
     dbug("exists");
     struct stat buf;
-    return !stat(lname.c_str(), &buf);
+    return !stat(filename.c_str(), &buf);
   }
 
 
@@ -120,7 +127,7 @@ private:
     recovering = 0;
     struct stat buf;
     log = NULL;
-    int orig_lock = lock_type;
+    //int orig_lock = lock_type;
 
     /* no lock has to be taken here */
     /* if log does not exist, no recovery needed*/
@@ -187,7 +194,7 @@ private:
   }
 
 public:
-	SparseBitmap(std::string filename,int lock_mode = LOCK_SH,int verbose = 0) {
+	sparsebitmap(std::string filename,int lock_mode = LOCK_SH,int verbose = 0) {
     dbug("construct");
     fp = NULL; 
     log = NULL;
@@ -196,7 +203,7 @@ public:
     open(filename, lock_mode);
   };
 
-	~SparseBitmap() {
+	~sparsebitmap() {
     unlock();
     if(fp){ fsync(fileno(fp)); fclose(fp); }
     if(log) { fsync(fileno(log)); fclose(log); }
@@ -277,11 +284,12 @@ public:
     fsync(fileno(fp));
     close(1);
     dirty = 0;
-    return 0;
+    return !(sz == BLOCK_SIZE);
   }
 
   int rollback() {
     close(1);
+    return 0;
   }
 
 
@@ -292,9 +300,11 @@ public:
     lock(LOCK_SH);
     int bit_offset;
     unsigned long long at_byte = (bitnum / MAX_BITS) + ((bit_offset = (bitnum % MAX_BITS)) != 0) - 1;
-    fseek(fp, at_byte, SEEK_SET);
-    size_t sz = fread(&bits, 8, 1, fp);
-    if(sz == 0 || feof(fp)) return 0;
+    if(at_byte == 0 || at_byte != ftell(fp)) {
+      fseek(fp, at_byte, SEEK_SET);
+      size_t sz = fread(&bits, 8, 1, fp);
+      if(sz == 0 || feof(fp)) return 0;
+    }
     return (bits >> bit_offset) & 1; 
   }
 
@@ -305,6 +315,10 @@ public:
   inline int set_bit(unsigned long long bitnum, int mode = MODE_SET) {
     dbug("set_bit");
     if(!fp || have_lock != LOCK_EX) open(fname, LOCK_EX);
+    bool force_read = false;
+    if(dirty == 0) {
+      force_read = true;
+    }
     dirty = 1;
     // write-ahead-log (only write when not in recovery mode) 
     // sz2 will be <1 on write error
@@ -312,22 +326,22 @@ public:
     if(!recovering) sz = fwrite(&bitnum, 1, 8, log);
     if(!recovering && sz != 8) return -1;
 
-    if(!lock_type == LOCK_EX) lock(LOCK_EX);
+    if(lock_type != LOCK_EX) lock(LOCK_EX);
 
     /* which bit in the unsigned long long is to be set */
     int bit_offset;
 
     /* where to read at in file */
-    unsigned long long at_byte = (bitnum / MAX_BITS) + ((bit_offset = (bitnum % MAX_BITS)) != 0) - 1;
+    long int at_byte = (bitnum / MAX_BITS) + ((bit_offset = (bitnum % MAX_BITS)) != 0) - 1;
 
-    /* if the bits are not already in memory, read them in */
-    if(ftell(fp) != at_byte) {
+    /* read the bits into memory */
+    if(force_read || at_byte != ftell(fp)) {
       fseek(fp, at_byte, SEEK_SET);
       sz = fread(&bits, BLOCK_SIZE, 1, fp);
       if(ferror(fp)) return 0;
-      if(sz = 0 || feof(fp)) bits = 0;
-    } 
-
+      if(sz == 0 || feof(fp)) bits = 0;
+    }
+    
     if(mode == MODE_SET)
       bits |= 1 << bit_offset; 
     else
