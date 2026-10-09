@@ -1,2 +1,2 @@
 test:
-	g++ SparseBitmap.hpp test.cpp -o test
+	g++ sparsebitmap.hpp test.cpp -o test
